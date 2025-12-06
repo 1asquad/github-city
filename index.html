@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>GitHub City 3D - Ultimate</title>
+    <style>
+        /* --- GENERAL CSS --- */
+        body { margin: 0; overflow: hidden; background-color: #050505; color: white; font-family: 'Courier New', Courier, monospace; }
+        
+        /* --- UI OVERLAY (Welcome Screen) --- */
+        #overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(5, 5, 10, 0.95);
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            z-index: 300; transition: opacity 0.5s;
+        }
+        #ui-container {
+            text-align: center; border: 2px solid #00ffcc; padding: 40px; background: #000;
+            box-shadow: 0 0 30px rgba(0, 255, 204, 0.2); border-radius: 4px;
+        }
+        h1 { margin: 0 0 20px 0; font-size: 2rem; text-transform: uppercase; letter-spacing: 4px; color: #00ffcc; text-shadow: 0 0 10px rgba(0,255,204,0.5); }
+        
+        /* Input field style */
+        input {
+            padding: 15px; font-size: 1.2rem; background: #111; border: 1px solid #333; color: #00ffcc;
+            text-align: center; outline: none; width: 250px; margin-bottom: 20px; font-family: inherit;
+        }
+        input::placeholder { color: #444; } /* Darker placeholder text */
+
+        button {
+            padding: 15px 30px; font-size: 1rem; cursor: pointer; background: #00ffcc; color: #000;
+            border: none; font-weight: bold; text-transform: uppercase; transition: all 0.2s;
+        }
+        button:hover { transform: scale(1.05); background: #fff; box-shadow: 0 0 20px #00ffcc; }
+        .loading-text { margin-top: 15px; color: #aaa; font-size: 0.9rem; display: none;}
+
+        /* --- HUD (Info Display) --- */
+        #info { 
+            position: absolute; top: 10px; width: 100%; text-align: center; z-index: 200; pointer-events: none; 
+            display: none;
+        }
+
+        /* --- LEGEND PANEL --- */
+        #legend {
+            position: absolute; top: 20px; right: 20px; background: rgba(0, 0, 0, 0.7);
+            border: 1px solid #00ffcc; padding: 15px; border-radius: 5px; z-index: 200;
+            display: none; box-shadow: 0 0 15px rgba(0, 255, 204, 0.1);
+        }
+        #legend h3 {
+            margin: 0 0 10px 0; font-size: 0.9rem; color: #00ffcc; border-bottom: 1px solid #333;
+            padding-bottom: 5px; text-transform: uppercase;
+        }
+        .legend-item { display: flex; align-items: center; margin-bottom: 5px; font-size: 0.8rem; color: #ccc; }
+        .color-box { width: 12px; height: 12px; margin-right: 10px; border: 1px solid #555; box-shadow: 0 0 5px rgba(255,255,255,0.2); }
+
+        /* --- BUILDING LABELS --- */
+        #label-container {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 100; overflow: hidden;
+        }
+        .repo-label {
+            position: absolute; color: rgba(255, 255, 255, 0.8); background: rgba(0, 0, 0, 0.6);
+            padding: 2px 5px; border-radius: 4px; font-size: 10px; font-family: sans-serif;
+            user-select: none; white-space: nowrap; transform: translate(-50%, -100%); 
+            box-shadow: 0 0 5px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="overlay">
+        <div id="ui-container">
+            <h1>GitHub City OS</h1>
+            <input type="text" id="username-input" placeholder="Enter Username">
+            <br>
+            <button id="generate-btn">INITIALIZE CITY</button>
+            <p class="loading-text" id="loading-msg">Connecting to GitHub API...</p>
+        </div>
+    </div>
+
+    <div id="info">
+        <h1 style="font-size: 1.2rem; color: #00ffcc;">GITHUB CITY VIEWER</h1>
+        <p>Architect: <span id="username-display" style="color:white; font-weight:bold;">...</span> | <a href="#" onclick="location.reload()" style="color:#00ffcc; pointer-events:auto; text-decoration:none;">[ NEW SEARCH ]</a></p>
+    </div>
+
+    <div id="legend">
+        <h3>System Colors</h3>
+        <div id="legend-items">
+            </div>
+    </div>
+
+    <div id="label-container"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+    <script>
+        // --- CONFIGURATION ---
+        const COLORS = {
+            'Python': '#2b5b84',
+            'JavaScript': '#bfa826',
+            'TypeScript': '#225d6e',
+            'HTML': '#ba3d1e',
+            'CSS': '#463166',
+            'Shell': '#6eba40',
+            'Solidity': '#292929',
+            'C++': '#f34b7d',
+            'Rust': '#dea584',
+            'Go': '#00ADD8',
+            'Default': '#aaaaaa'
+        };
+
+        // --- 3D SCENE SETUP ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x050510);
+        scene.fog = new THREE.FogExp2(0x050510, 0.015); 
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
+        camera.position.set(0, 30, 40);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio); 
+        renderer.shadowMap.enabled = true; 
+        document.body.appendChild(renderer.domElement);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4); 
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xaabbff, 1);
+        dirLight.position.set(50, 100, 50);
+        dirLight.castShadow = true;
+        dirLight.shadow.camera.top = 50; dirLight.shadow.camera.bottom = -50;
+        dirLight.shadow.camera.left = -50; dirLight.shadow.camera.right = 50;
+        dirLight.shadow.mapSize.width = 2048; dirLight.shadow.mapSize.height = 2048;
+        scene.add(dirLight);
+
+        // Ground
+        const gridHelper = new THREE.GridHelper(200, 100, 0x00ffcc, 0x222244);
+        gridHelper.position.y = 0.1;
+        scene.add(gridHelper);
+        
+        const planeGeo = new THREE.PlaneGeometry(500, 500);
+        const planeMat = new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 0.1, metalness: 0.8 });
+        const plane = new THREE.Mesh(planeGeo, planeMat);
+        plane.rotation.x = -Math.PI / 2;
+        plane.receiveShadow = true;
+        scene.add(plane);
+
+        const cityGroup = new THREE.Group();
+        scene.add(cityGroup);
+
+        // --- UI ELEMENTS ---
+        const btn = document.getElementById('generate-btn');
+        const input = document.getElementById('username-input');
+        const overlay = document.getElementById('overlay');
+        const loadingMsg = document.getElementById('loading-msg');
+        const infoDiv = document.getElementById('info');
+        const legendDiv = document.getElementById('legend');
+        const displaySpan = document.getElementById('username-display');
+        const labelContainer = document.getElementById('label-container');
+
+        let cityLabelsData = []; 
+
+        // --- EVENT LISTENERS ---
+        btn.addEventListener('click', () => handleInput());
+        input.addEventListener('keypress', (e) => { if (e.key === 'Enter') handleInput(); });
+
+        function handleInput() {
+            const username = input.value.trim();
+            if(username) startGeneration(username);
+            else alert("Please enter a username!");
+        }
+
+        // --- LEGEND GENERATION ---
+        function buildLegend() {
+            const container = document.getElementById('legend-items');
+            container.innerHTML = ''; 
+            
+            for (const [lang, color] of Object.entries(COLORS)) {
+                const item = document.createElement('div');
+                item.className = 'legend-item';
+                
+                const box = document.createElement('div');
+                box.className = 'color-box';
+                box.style.backgroundColor = color;
+                
+                const text = document.createElement('span');
+                text.innerText = lang;
+                
+                item.appendChild(box);
+                item.appendChild(text);
+                container.appendChild(item);
+            }
+        }
+        
+        buildLegend();
+
+        // --- CORE LOGIC ---
+
+        function createWindowTexture(baseColorHex) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 64;
+            canvas.height = 128; 
+            const context = canvas.getContext('2d');
+
+            context.fillStyle = baseColorHex;
+            context.fillRect(0, 0, canvas.width, canvas.height);
+            context.fillStyle = '#ffffcc'; 
+
+            const rows = 8;
+            const cols = 4;
+            const padding = 4;
+            const wWidth = (canvas.width - (cols + 1) * padding) / cols;
+            const wHeight = (canvas.height - (rows + 1) * padding) / rows;
+
+            for (let i = 0; i < cols; i++) {
+                for (let j = 0; j < rows; j++) {
+                    if (Math.random() > 0.2) { 
+                        const x = padding + i * (wWidth + padding);
+                        const y = padding + j * (wHeight + padding);
+                        context.fillRect(x, y, wWidth, wHeight);
+                    }
+                }
+            }
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            return texture;
+        }
+
+
+        async function startGeneration(username) {
+            loadingMsg.style.display = "block";
+            btn.disabled = true; btn.style.opacity = "0.5";
+
+            while(cityGroup.children.length > 0) cityGroup.remove(cityGroup.children[0]); 
+            labelContainer.innerHTML = '';
+            cityLabelsData = [];
+
+            try {
+                const response = await fetch(`https://api.github.com/users/${username}/repos?sort=updated&per_page=100`);
+                if (!response.ok) throw new Error("User not found");
+                const repos = await response.json();
+                
+                if (repos.length === 0) { alert("No public repos."); resetUI(); return; }
+
+                buildCity(repos);
+
+                overlay.style.opacity = "0";
+                setTimeout(() => { overlay.style.display = "none"; }, 500);
+                
+                infoDiv.style.display = "block";
+                legendDiv.style.display = "block"; 
+                
+                displaySpan.innerText = username;
+
+            } catch (error) {
+                console.error(error); alert("Error: " + error.message); resetUI();
+            }
+        }
+
+        function resetUI() {
+            loadingMsg.style.display = "none"; btn.disabled = false; btn.style.opacity = "1";
+        }
+
+        function buildCity(repos) {
+            const maxRepos = repos.slice(0, 64); 
+            let count = 0;
+            const spacing = 6; 
+            const gridSide = Math.ceil(Math.sqrt(maxRepos.length));
+            const offset = (gridSide * spacing) / 2 - spacing / 2; 
+
+            maxRepos.forEach((repo) => {
+                if (repo.fork) return;
+
+                const height = Math.max(2, Math.log2(repo.size + 1) * 1.5);
+                const language = repo.language || 'Default';
+                const colorHex = COLORS[language] || COLORS['Default'];
+                const buildingColor = new THREE.Color(colorHex);
+
+                const geometry = new THREE.BoxGeometry(3, height, 3);
+                const windowTexture = createWindowTexture(colorHex);
+                windowTexture.repeat.set(1, height / 8); 
+
+                const material = new THREE.MeshStandardMaterial({
+                    color: buildingColor,
+                    map: windowTexture,
+                    roughness: 0.3,
+                    metalness: 0.6,
+                    emissive: buildingColor,
+                    emissiveIntensity: 0.2
+                });
+
+                const building = new THREE.Mesh(geometry, material);
+                building.castShadow = true;
+                building.receiveShadow = true;
+
+                const row = Math.floor(count / gridSide);
+                const col = count % gridSide;
+                building.position.x = (col * spacing) - offset;
+                building.position.z = (row * spacing) - offset;
+                building.position.y = height / 2; 
+
+                const labelDiv = document.createElement('div');
+                labelDiv.className = 'repo-label';
+                labelDiv.innerText = repo.name;
+                labelContainer.appendChild(labelDiv);
+
+                cityLabelsData.push({
+                    mesh: building,
+                    div: labelDiv,
+                    height: height
+                });
+
+                cityGroup.add(building);
+                count++;
+            });
+        }
+
+        // --- ORBIT CONTROLS ---
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.autoRotate = true;
+        controls.autoRotateSpeed = 0.5;
+        controls.maxPolarAngle = Math.PI / 2 - 0.1; 
+
+        // --- LABEL UPDATE LOOP ---
+        const tempV = new THREE.Vector3();
+
+        function updateLabels() {
+            cityLabelsData.forEach(data => {
+                tempV.setFromMatrixPosition(data.mesh.matrixWorld);
+                tempV.y += data.height / 2 + 1; 
+
+                tempV.project(camera);
+
+                const x = (tempV.x * .5 + .5) * canvas.clientWidth;
+                const y = (tempV.y * -.5 + .5) * canvas.clientHeight;
+
+                if (tempV.z > 1) {
+                     data.div.style.display = 'none';
+                } else {
+                    data.div.style.display = 'block';
+                    data.div.style.transform = `translate(-50%, -100%) translate(${x}px, ${y}px)`;
+                    
+                    const dist = camera.position.distanceTo(data.mesh.position);
+                    data.div.style.opacity = Math.max(0.2, 1 - dist / 150);
+                }
+            });
+        }
+
+        const canvas = renderer.domElement;
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            if(cityLabelsData.length > 0) updateLabels(); 
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
